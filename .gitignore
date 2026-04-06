@@ -5,3 +5,9 @@ checkpoints/
 results/
 # Raw data
 dataset/
+paper/
+.venv/
+CLAUDE.md
+AGENTS.md
+.claude/
+.agents/

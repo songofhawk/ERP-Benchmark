@@ -205,22 +205,35 @@ def load_data_by_ids(data_path, label_path, ids, args):
     feature_list = []
     label_list = []
 
-    # load data by subject ids
-    for feature_filename, label_filename in zip(os.listdir(data_path), os.listdir(label_path)):
-        # get subject ID from filename, e.g., 'AD_1.npy'
-        sub_id = int(feature_filename.split('_')[-1].split('.')[0])
-        # only load subject with ID in the ids list
-        if sub_id in ids:
-            sub_feature_path = os.path.join(data_path, feature_filename)
-            sub_label_path = os.path.join(label_path, label_filename)
-            subject_feature = np.load(sub_feature_path)  # (N, T, C)
-            subject_label = np.load(sub_label_path)   # (N, xxx), column number depends on dataset
-            if subject_feature.shape[0] != subject_label.shape[0]:
-                print(f"Subject {sub_id} data and label length mismatch: " 
-                      f"{subject_feature.shape[0]} vs {subject_label.shape[0]}, skipped")
-                continue
-            feature_list.append(subject_feature)
-            label_list.append(subject_label)
+    def build_subject_file_map(folder_path):
+        subject_file_map = {}
+        for filename in sorted(os.listdir(folder_path)):
+            sub_id = int(filename.split('_')[-1].split('.')[0])
+            subject_file_map[sub_id] = filename
+        return subject_file_map
+
+    feature_file_map = build_subject_file_map(data_path)
+    label_file_map = build_subject_file_map(label_path)
+
+    # load data by subject ids and explicitly match feature/label files by subject id
+    for sub_id in sorted(ids):
+        if sub_id not in feature_file_map:
+            print(f"Subject {sub_id} feature file missing, skipped")
+            continue
+        if sub_id not in label_file_map:
+            print(f"Subject {sub_id} label file missing, skipped")
+            continue
+
+        sub_feature_path = os.path.join(data_path, feature_file_map[sub_id])
+        sub_label_path = os.path.join(label_path, label_file_map[sub_id])
+        subject_feature = np.load(sub_feature_path)  # (N, T, C)
+        subject_label = np.load(sub_label_path)   # (N, xxx), column number depends on dataset
+        if subject_feature.shape[0] != subject_label.shape[0]:
+            print(f"Subject {sub_id} data and label length mismatch: "
+                  f"{subject_feature.shape[0]} vs {subject_label.shape[0]}, skipped")
+            continue
+        feature_list.append(subject_feature)
+        label_list.append(subject_label)
     # concat and shuffle
     X = np.concatenate(feature_list, axis=0)
     y = np.concatenate(label_list, axis=0)

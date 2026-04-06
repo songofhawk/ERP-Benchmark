@@ -114,6 +114,8 @@ if __name__ == '__main__':
                         help='do not normalize data in data loader', default=False)
     parser.add_argument('--use_subject_vote', action='store_true',
                         help='sample voting for subject-level performance', default=False)
+    parser.add_argument('--use_class_weights', action='store_true',
+                        help='use inverse-frequency class weights in cross entropy', default=False)
     # fixed: fixed split, mccv: monte carlo cross validation,
     # 5-fold: 5-fold cross validation, loso: leave-one-subject-out
     parser.add_argument('--cross_val', type=str, default='mccv',
@@ -133,9 +135,20 @@ if __name__ == '__main__':
 
 
     args = parser.parse_args()
-    args.use_gpu = True if torch.cuda.is_available() and args.use_gpu else False
 
-    if args.use_gpu and args.use_multi_gpu:
+    if args.use_gpu and torch.cuda.is_available():
+        args.device_type = 'cuda'
+        args.use_gpu = True
+    elif args.use_gpu and torch.backends.mps.is_available():
+        args.device_type = 'mps'
+        args.use_gpu = True
+        args.use_multi_gpu = False
+    else:
+        args.device_type = 'cpu'
+        args.use_gpu = False
+        args.use_multi_gpu = False
+
+    if args.device_type == 'cuda' and args.use_multi_gpu:
         args.devices = args.devices.replace(' ', '')
         device_ids = args.devices.split(',')
         args.device_ids = [int(id_) for id_ in device_ids]
@@ -162,11 +175,12 @@ if __name__ == '__main__':
             os.environ['PYTHONHASHSEED'] = str(seed)
             np.random.seed(seed)
             torch.manual_seed(seed)
-            torch.cuda.manual_seed(seed)
-            torch.cuda.manual_seed_all(seed)
+            if args.device_type == 'cuda':
+                torch.cuda.manual_seed(seed)
+                torch.cuda.manual_seed_all(seed)
             # comment out the following lines if you are using dilated convolutions, e.g., TCN
             # otherwise it will slow down the training extremely
-            if args.model != "TCN":
+            if args.device_type == 'cuda' and args.model != "TCN":
                 torch.backends.cudnn.benchmark = False
                 torch.backends.cudnn.deterministic = True
 
@@ -202,7 +216,8 @@ if __name__ == '__main__':
             subject_val_metrics_dict_list.append(subject_val_metrics_dict)
             sample_test_metrics_dict_list.append(sample_test_metrics_dict)
             subject_test_metrics_dict_list.append(subject_test_metrics_dict)
-            torch.cuda.empty_cache()
+            if args.device_type == 'cuda':
+                torch.cuda.empty_cache()
         compute_avg_std(args, sample_val_metrics_dict_list, subject_val_metrics_dict_list,
                         sample_test_metrics_dict_list, subject_test_metrics_dict_list, total_params)
 
@@ -213,11 +228,12 @@ if __name__ == '__main__':
             os.environ['PYTHONHASHSEED'] = str(seed)
             np.random.seed(seed)
             torch.manual_seed(seed)
-            torch.cuda.manual_seed(seed)
-            torch.cuda.manual_seed_all(seed)
+            if args.device_type == 'cuda':
+                torch.cuda.manual_seed(seed)
+                torch.cuda.manual_seed_all(seed)
             # comment out the following lines if you are using dilated convolutions, e.g., TCN
             # otherwise it will slow down the training extremely
-            if args.model != "TCN":
+            if args.device_type == 'cuda' and args.model != "TCN":
                 torch.backends.cudnn.benchmark = False
                 torch.backends.cudnn.deterministic = True
 
@@ -249,7 +265,8 @@ if __name__ == '__main__':
             subject_val_metrics_dict_list.append(subject_val_metrics_dict)
             sample_test_metrics_dict_list.append(sample_test_metrics_dict)
             subject_test_metrics_dict_list.append(subject_test_metrics_dict)
-            torch.cuda.empty_cache()
+            if args.device_type == 'cuda':
+                torch.cuda.empty_cache()
         compute_avg_std(args, sample_val_metrics_dict_list, subject_val_metrics_dict_list,
                         sample_test_metrics_dict_list, subject_test_metrics_dict_list, total_params)
 

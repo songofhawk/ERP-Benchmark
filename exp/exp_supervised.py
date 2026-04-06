@@ -38,6 +38,12 @@ class Exp_Supervised(Exp_Basic):
         # self.args.num_class = len(train_data.class_names)
         self.args.enc_in = train_data.X.shape[2]  # redefine enc_in
         self.args.num_class = len(np.unique(train_data.y[:, 0]))  # column 0 is the label
+        class_counts = np.bincount(train_data.y[:, 0].astype(int), minlength=self.args.num_class)
+        total_samples = class_counts.sum()
+        self.class_weights = torch.tensor(
+            total_samples / (self.args.num_class * np.maximum(class_counts, 1)),
+            dtype=torch.float32
+        )
         # model init
         model = (
             self.model_dict[self.args.model].Model(self.args).float()
@@ -56,7 +62,10 @@ class Exp_Supervised(Exp_Basic):
         return model_optim
 
     def _select_criterion(self):
-        criterion = nn.CrossEntropyLoss()
+        if self.args.use_class_weights:
+            criterion = nn.CrossEntropyLoss(weight=self.class_weights.to(self.device))
+        else:
+            criterion = nn.CrossEntropyLoss()
         return criterion
 
     def vali(self, vali_data, vali_loader, criterion):

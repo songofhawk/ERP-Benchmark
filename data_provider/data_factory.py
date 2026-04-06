@@ -14,9 +14,11 @@ data_type_dict = {
 def data_provider(args, flag):
     Data = data_type_dict[args.data]
 
-    if flag == 'test':
+    flag = flag.upper()
+
+    if flag in ('VAL', 'TEST'):
         shuffle_flag = False
-        drop_last = True
+        drop_last = False
         if args.task_name == 'supervised':
             batch_size = args.batch_size
         else:
@@ -27,7 +29,6 @@ def data_provider(args, flag):
         batch_size = args.batch_size  # bsz for train and valid
 
     if args.task_name == 'supervised':
-        drop_last = True
         data_set = Data(
             root_path=args.root_path,
             args=args,
