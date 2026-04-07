@@ -140,7 +140,7 @@ Phase 1 已经完成，当前 baseline 比最初结果更可信。
 | --- | --- | --- |
 | `EEGFeatures` | `scripts/EEGFeatures/supervised/EEGFeatures/S-1.sh` | 已完成 `CESCA-AODD` 长跑，并补跑 `MPS` |
 | `ERPFeatures` | `scripts/ERPFeatures/supervised/ERPFeatures/S-1.sh` | 已完成 `CESCA-AODD` 长跑，并补跑 `MPS` |
-| `EEGNet` | 当前 Phase 1 已有修正版 baseline | 已有 baseline |
+| `EEGNet` | 当前 Phase 1 已有修正版 baseline | 已完成 `CESCA-AODD` 长跑，并补跑 `MPS` |
 | `EEGConformer` | `scripts/EEGConformer/supervised/EEGConformer/S-1.sh` | 已完成 `CESCA-AODD` 长跑（MPS） |
 
 ### 2.1 当前实验设置
@@ -153,8 +153,7 @@ Phase 1 已经完成，当前 baseline 比最初结果更可信。
 | 训练 / 测试 | `training_datasets=CESCA-AODD`, `testing_datasets=CESCA-AODD` |
 | 类别不平衡处理 | 统一开启 `--use_class_weights` |
 | 运行次数 | 当前先固定 `itr=1`，对应 seed 41 |
-| EEGNet | 直接复用 Phase 1 可信 baseline |
-| EEGConformer | 最终长跑在本机 `MPS` 设备完成 |
+| 运行环境 | 当前四种方法都已有本机 `MPS` 长跑结果 |
 
 ### 2.2 已完成实验
 
@@ -162,10 +161,10 @@ Phase 1 已经完成，当前 baseline 比最初结果更可信。
 | --- | --- | --- |
 | `EEGFeatures` | `results/EEGFeatures/supervised/EEGFeatures/S-CESCA-AODD-phase2-long-mps/results.txt` | F1 49.89%, AUROC 49.26% |
 | `ERPFeatures` | `results/ERPFeatures/supervised/ERPFeatures/S-CESCA-AODD-phase2-long-mps/results.txt` | F1 51.77%, AUROC 55.30% |
-| `EEGNet` | `results/EEGNet/supervised/EEGNet/S-CESCA-AODD-canonical-balanced-long/results.txt` | F1 53.81%, AUROC 61.01% |
+| `EEGNet` | `results/EEGNet/supervised/EEGNet/S-CESCA-AODD-canonical-balanced-long-mps/results.txt` | F1 52.00%, AUROC 59.18% |
 | `EEGConformer` | `results/EEGConformer/supervised/EEGConformer/S-CESCA-AODD-phase2-long-mps/results.txt` | F1 57.45%, AUROC 62.85% |
 
-当前按 `Test F1 / AUROC` 的排序为：
+当前按统一 `MPS` 环境下的 `Test F1 / AUROC` 排序为：
 
 1. `EEGConformer`
 2. `EEGNet`
@@ -176,12 +175,13 @@ Phase 1 已经完成，当前 baseline 比最初结果更可信。
 
 1. `EEGFeatures` 的 `MPS` 结果与原 CPU 长跑数值一致，说明其训练与评估在当前设置下基本稳定。
 2. `ERPFeatures` 的 `MPS` 结果与原 CPU 长跑有轻微数值差异（Test F1 从 52.99% 变为 51.77%），但方法排序没有变化。
-3. 当前 `EEGConformer`、`EEGFeatures`、`ERPFeatures` 已都验证过本机 `MPS` 可运行；`EEGNet` 当前仍直接复用 Phase 1 baseline。
+3. `EEGNet` 的 `MPS` 长跑结果低于此前 CPU baseline（Test F1 从 53.81% 变为 52.00%），说明当前实验在不同设备路径下仍可能存在一定数值波动。
+4. 当前四种方法都已经有本机 `MPS` 结果，因此后续若强调公平对比，应优先引用 `-mps` 版本结果。
 
 ### 2.3 当前观察与结论
 
 1. 在 `CESCA-AODD` 上，当前单数据集对比结果支持“深度学习方法整体优于手工特征方法”的趋势。
-2. `EEGConformer` 当前是四种方法里最优，略优于当前 `EEGNet` baseline。
+2. `EEGConformer` 当前是四种方法里最优，在统一 `MPS` 对比下仍明显领先。
 3. `ERPFeatures` 明显优于 `EEGFeatures`，说明 ERP 任务中更贴近诱发成分的手工特征仍然有效。
 4. 当前结论仍然只是 `CESCA-AODD + seed 41` 条件下的受控对比，还不能直接替代论文 A1 的全结论。
 
@@ -195,9 +195,9 @@ Phase 1 已经完成，当前 baseline 比最初结果更可信。
 
 ### 2.5 下一步
 
-1. 决定是否把 `EEGNet` 也在 `MPS` 上补跑一次，使四个方法的硬件环境完全一致。
-2. 评估是否把当前 `CESCA-AODD` 结果扩展到更多 ERP 数据集，再对照论文 A1 结论。
-3. 若继续 Phase 2，优先考虑增加重复随机种子或扩展到第二个 ERP 数据集，而不是直接跳到全量 12 数据集。
+1. 评估是否把当前 `CESCA-AODD` 结果扩展到更多 ERP 数据集，再对照论文 A1 结论。
+2. 若继续 Phase 2，优先考虑增加重复随机种子或扩展到第二个 ERP 数据集，而不是直接跳到全量 12 数据集。
+3. 若要分析设备影响，可单独整理 CPU vs MPS 的差异，而不要与方法对比混写。
 4. 在 Phase 2 结论稳定后，再开始 Phase 3 的 patch embedding 对比。
 
 ## 3. Phase 3：A4 结论复现计划

@@ -429,17 +429,19 @@ Apple M2 MPS 加速可用
 2. 即使使用同一个 `.venv`，沙箱内外也可能得到不同的设备可用性结论。
 3. 因此设备问题排查时，需要同时记录“解释器环境”和“是否为沙箱运行”。
 
-### 手工特征方法补跑结果
+### 手工特征与 `EEGNet` 的 `MPS` 补跑结果
 
-在修复 `exp/exp_supervised.py` 的验证阶段设备一致性后，已对 `EEGFeatures` 和 `ERPFeatures` 重新做 `MPS` 长跑：
+在修复 `exp/exp_supervised.py` 的验证阶段设备一致性后，已对 `EEGFeatures`、`ERPFeatures` 和 `EEGNet` 重新做 `MPS` 长跑：
 
 | 方法 | 结果路径 | Test F1 | Test AUROC |
 | --- | --- | ---: | ---: |
 | `EEGFeatures` | `results/EEGFeatures/supervised/EEGFeatures/S-CESCA-AODD-phase2-long-mps/results.txt` | 49.89% | 49.26% |
 | `ERPFeatures` | `results/ERPFeatures/supervised/ERPFeatures/S-CESCA-AODD-phase2-long-mps/results.txt` | 51.77% | 55.30% |
+| `EEGNet` | `results/EEGNet/supervised/EEGNet/S-CESCA-AODD-canonical-balanced-long-mps/results.txt` | 52.00% | 59.18% |
 
 对比原先 CPU 长跑：
 
 1. `EEGFeatures` 的数值基本一致。
 2. `ERPFeatures` 存在轻微数值波动，但整体排序未变。
-3. 当前 `MPS` 补跑已经覆盖 `EEGFeatures / ERPFeatures / EEGConformer`，说明这三种方法在本机 `MPS` 路径下都可以稳定完成训练与评估。
+3. `EEGNet` 的 `MPS` 结果低于此前 CPU baseline，说明当前设置下不同设备路径之间仍可能存在可见的数值波动。
+4. 当前 `MPS` 补跑已经覆盖 `EEGFeatures / ERPFeatures / EEGNet / EEGConformer`，说明这四种方法在本机 `MPS` 路径下都可以稳定完成训练与评估。
