@@ -3,11 +3,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/../../../.." && pwd)"
-PYTHON_BIN="${PYTHON_BIN:-$ROOT_DIR/.venv/bin/python}"
+PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
 DATA_ROOT="${DATA_ROOT:-$ROOT_DIR/dataset/200Hz}"
 DATASET_DIR="$DATA_ROOT/CESCA-AODD"
 export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp/.cache}"
+
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  echo "Missing project virtualenv python: $PYTHON_BIN"
+  exit 1
+fi
 
 if [[ ! -d "$DATASET_DIR/Feature" || ! -d "$DATASET_DIR/Label" ]]; then
   echo "Missing processed dataset at: $DATASET_DIR"

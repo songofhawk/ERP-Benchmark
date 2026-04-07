@@ -13,7 +13,7 @@
 | 阶段 | 目标 | 当前状态 |
 | --- | --- | --- |
 | Phase 1 | 跑通 `CESCA-AODD + EEGNet` 完整 pipeline，并拿到可信 baseline | 已完成可信 baseline |
-| Phase 2 | 复现 A1：手工特征 vs 深度学习 | 待开始 |
+| Phase 2 | 复现 A1：手工特征 vs 深度学习 | 进行中，已完成 `CESCA-AODD` 单数据集对比 |
 | Phase 3 | 复现 A4：patch embedding 对比 | 待开始 |
 
 当前建议的推进顺序：
@@ -138,17 +138,67 @@ Phase 1 已经完成，当前 baseline 比最初结果更可信。
 
 | 方法 | 脚本参考 | 状态 |
 | --- | --- | --- |
-| `EEGFeatures` | `scripts/EEGFeatures/supervised/EEGFeatures/S-1.sh` | 待跑 |
-| `ERPFeatures` | `scripts/ERPFeatures/supervised/ERPFeatures/S-1.sh` | 待跑 |
+| `EEGFeatures` | `scripts/EEGFeatures/supervised/EEGFeatures/S-1.sh` | 已完成 `CESCA-AODD` 长跑，并补跑 `MPS` |
+| `ERPFeatures` | `scripts/ERPFeatures/supervised/ERPFeatures/S-1.sh` | 已完成 `CESCA-AODD` 长跑，并补跑 `MPS` |
 | `EEGNet` | 当前 Phase 1 已有修正版 baseline | 已有 baseline |
-| `EEGConformer` | `scripts/EEGConformer/supervised/EEGConformer/S-1.sh` | 待跑 |
+| `EEGConformer` | `scripts/EEGConformer/supervised/EEGConformer/S-1.sh` | 已完成 `CESCA-AODD` 长跑（MPS） |
 
-Phase 2 待办：
+### 2.1 当前实验设置
 
-1. 确认 `EEGFeatures / ERPFeatures / EEGConformer` 是否受 `load_data_by_ids()` 修复影响并能正常跑。
-2. 为所有 supervised 方法统一使用修复后的 `VAL/TEST drop_last=False`。
-3. 评估是否所有方法都应使用 `--use_class_weights`，或是否只作为“不平衡修正版”单独报告。
-4. 整理四种方法在 `CESCA-AODD` 上的 F1 / AUROC 排序，和论文 A1 结论对照。
+本轮 Phase 2 先在同一个数据集 `CESCA-AODD` 上控制变量，只比较方法差异，不扩大到多数据集。
+
+| 项目 | 设置 |
+| --- | --- |
+| 数据集 | `CESCA-AODD` |
+| 训练 / 测试 | `training_datasets=CESCA-AODD`, `testing_datasets=CESCA-AODD` |
+| 类别不平衡处理 | 统一开启 `--use_class_weights` |
+| 运行次数 | 当前先固定 `itr=1`，对应 seed 41 |
+| EEGNet | 直接复用 Phase 1 可信 baseline |
+| EEGConformer | 最终长跑在本机 `MPS` 设备完成 |
+
+### 2.2 已完成实验
+
+| 方法 | 结果路径 | 关键 Test 结果 |
+| --- | --- | --- |
+| `EEGFeatures` | `results/EEGFeatures/supervised/EEGFeatures/S-CESCA-AODD-phase2-long-mps/results.txt` | F1 49.89%, AUROC 49.26% |
+| `ERPFeatures` | `results/ERPFeatures/supervised/ERPFeatures/S-CESCA-AODD-phase2-long-mps/results.txt` | F1 51.77%, AUROC 55.30% |
+| `EEGNet` | `results/EEGNet/supervised/EEGNet/S-CESCA-AODD-canonical-balanced-long/results.txt` | F1 53.81%, AUROC 61.01% |
+| `EEGConformer` | `results/EEGConformer/supervised/EEGConformer/S-CESCA-AODD-phase2-long-mps/results.txt` | F1 57.45%, AUROC 62.85% |
+
+当前按 `Test F1 / AUROC` 的排序为：
+
+1. `EEGConformer`
+2. `EEGNet`
+3. `ERPFeatures`
+4. `EEGFeatures`
+
+补跑 `MPS` 后的观察：
+
+1. `EEGFeatures` 的 `MPS` 结果与原 CPU 长跑数值一致，说明其训练与评估在当前设置下基本稳定。
+2. `ERPFeatures` 的 `MPS` 结果与原 CPU 长跑有轻微数值差异（Test F1 从 52.99% 变为 51.77%），但方法排序没有变化。
+3. 当前 `EEGConformer`、`EEGFeatures`、`ERPFeatures` 已都验证过本机 `MPS` 可运行；`EEGNet` 当前仍直接复用 Phase 1 baseline。
+
+### 2.3 当前观察与结论
+
+1. 在 `CESCA-AODD` 上，当前单数据集对比结果支持“深度学习方法整体优于手工特征方法”的趋势。
+2. `EEGConformer` 当前是四种方法里最优，略优于当前 `EEGNet` baseline。
+3. `ERPFeatures` 明显优于 `EEGFeatures`，说明 ERP 任务中更贴近诱发成分的手工特征仍然有效。
+4. 当前结论仍然只是 `CESCA-AODD + seed 41` 条件下的受控对比，还不能直接替代论文 A1 的全结论。
+
+### 2.4 本阶段新增问题与修复
+
+| 问题 | 影响 | 修复位置 |
+| --- | --- | --- |
+| `EEGConformer` 在 `MPS` 验证阶段报 `Placeholder storage has not been allocated on MPS device` | 训练能跑，但第一次验证就崩溃 | `exp/exp_supervised.py` |
+| 本地 shell 默认 `python` 指向 `pyenv`，容易与项目 `.venv` 混用 | `verify_env.py` 与训练脚本可能落在不同 `torch` 环境 | `scripts/EEGNet/supervised/EEGNet/S-1-local-mac.sh` |
+| Codex 沙箱内 `MPS` 设备不可见 | 在沙箱内运行时会自动回退到 CPU，误判为环境问题 | 启动命令需使用非沙箱方式 |
+
+### 2.5 下一步
+
+1. 决定是否把 `EEGNet` 也在 `MPS` 上补跑一次，使四个方法的硬件环境完全一致。
+2. 评估是否把当前 `CESCA-AODD` 结果扩展到更多 ERP 数据集，再对照论文 A1 结论。
+3. 若继续 Phase 2，优先考虑增加重复随机种子或扩展到第二个 ERP 数据集，而不是直接跳到全量 12 数据集。
+4. 在 Phase 2 结论稳定后，再开始 Phase 3 的 patch embedding 对比。
 
 ## 3. Phase 3：A4 结论复现计划
 

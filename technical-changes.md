@@ -12,9 +12,10 @@
 | DataLoader 评估逻辑 | `data_provider/data_factory.py` | `VAL/TEST` 不再丢最后一个 batch |
 | 设备选择 | `run.py`, `exp/exp_basic.py` | 支持 `cuda / mps / cpu`，适配本地 Mac |
 | 类别不平衡 | `run.py`, `exp/exp_supervised.py` | 新增 `--use_class_weights`，可启用 inverse-frequency weighted CE |
+| 验证阶段设备一致性 | `exp/exp_supervised.py` | 验证/测试 loss 保持在模型当前设备计算，修复 `MPS` 下的 device mismatch |
 | 模型实现 | `models/EEGNet.py` | 将原自定义 `TemporalSpatialConv` 版本替换为标准 EEGNet-style 结构 |
 | NumPy 兼容 | `utils/tools.py` | `np.Inf` 替换为 `np.inf`，兼容 NumPy 2.x |
-| 本地脚本 | `scripts/EEGNet/supervised/EEGNet/S-1-local-mac.sh` | 增加本地 Phase 1 运行入口 |
+| 本地脚本 | `scripts/EEGNet/supervised/EEGNet/S-1-local-mac.sh` | 增加本地 Phase 1 运行入口，并固定使用项目 `.venv/bin/python` |
 | Git 忽略 | `.gitignore` | 忽略 `paper/` 与 `.venv/` 等本地大文件或环境目录 |
 
 ## 1. 数据加载修复：按 Subject ID 配对
@@ -141,7 +142,7 @@ args.use_gpu = True if torch.cuda.is_available() and args.use_gpu else False
 
 ### 影响
 
-本地 Mac 能更稳定运行。当前环境实际仍显示 `device_type='cpu'`，因为当前 `.venv` 的 torch 未检测到 MPS 可用，但代码路径已兼容 MPS。
+本地 Mac 能更稳定运行。后续验证表明：在本机直接运行时，项目 `.venv` 可以正确检测并使用 `MPS`；但在受限沙箱环境下，`MPS` 可能被屏蔽，表现为自动回退到 `CPU`。因此需要区分“代码是否支持 `MPS`”和“当前运行环境是否允许访问 `MPS`”。
 
 ## 4. 类别权重：`--use_class_weights`
 
@@ -326,3 +327,119 @@ MPLCONFIGDIR=/tmp/matplotlib XDG_CACHE_HOME=/tmp/.cache .venv/bin/python -u run.
 | 高 | 决定是否保留原 EEGNet 实现备份 | 严格复现论文原代码 vs 修正 baseline 需要说明 |
 | 中 | 尝试 `WeightedRandomSampler` | 对比 class weights 是否更稳 |
 | 中 | 为 Phase 2 方法统一检查类别权重与评估逻辑 | 保证对比公平 |
+
+## 11. `MPS` 验证阶段设备一致性修复
+
+### 问题
+
+`EEGConformer` 在 Apple Silicon 本机 `MPS` 上训练时，训练阶段可以正常前向与反向，但第一次进入验证阶段时报错：
+
+```text
+RuntimeError: Placeholder storage has not been allocated on MPS device!
+```
+
+定位后发现，问题不在模型本身，而在 `exp/exp_supervised.py` 的 `vali()`：
+
+```python
+pred = outputs.detach().cpu()
+loss = criterion(pred, label.long().cpu())
+```
+
+这里把 `outputs` 和 `label` 先搬回了 `CPU`，但当 `--use_class_weights` 打开时，`criterion` 内部的类别权重仍然放在 `self.device` 上。CPU 张量与 MPS 权重混用，在 CPU 训练时不会暴露，在 `MPS` 下会直接崩溃。
+
+### 修改
+
+位置：`exp/exp_supervised.py`
+
+现在验证阶段先在当前设备上计算 loss，再把预测和标签搬回 `CPU` 做指标统计。核心调整为：
+
+```python
+loss = criterion(outputs, label.long())
+total_loss.append(loss.item())
+
+preds.append(outputs.detach().cpu())
+trues.append(label.detach().cpu())
+ids.append(sub_id.detach().cpu())
+dataset_ids.append(dataset_id.detach().cpu())
+```
+
+### 验证
+
+1. 用 `.venv/bin/python` 在 CPU 下重新做了 `EEGConformer` 的 1 epoch sanity run，完整训练、验证、测试都能通过。
+2. 用本机非沙箱方式重新启动 `EEGConformer` 长跑，日志确认 `Use GPU: mps`。
+3. 长跑成功越过首次验证阶段，并在 `epoch 6` early stopping 后正常结束。
+
+对应结果：
+
+```text
+results/EEGConformer/supervised/EEGConformer/S-CESCA-AODD-phase2-long-mps/results.txt
+```
+
+### 影响
+
+这是设备一致性修复，不改变训练目标或指标定义；它修复的是 `MPS` 下验证流程与 `CrossEntropyLoss(weight=...)` 的设备不一致问题。
+
+## 12. 本地解释器固定到项目 `.venv`
+
+### 问题
+
+本地 shell 默认 `python` 指向的是 `pyenv` 环境，而不是仓库内的 `.venv`。这会导致：
+
+1. `verify_env.py` 与训练脚本可能使用不同版本的 `torch`。
+2. 表面看起来“同一条命令”，实际设备可用性判断可能不一致。
+3. 复现实验很容易落到错误环境里，导致结果不可比较。
+
+### 修改
+
+位置：`scripts/EEGNet/supervised/EEGNet/S-1-local-mac.sh`
+
+把原先可被外部环境变量覆盖的：
+
+```bash
+PYTHON_BIN="${PYTHON_BIN:-$ROOT_DIR/.venv/bin/python}"
+```
+
+改成固定使用项目解释器：
+
+```bash
+PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
+```
+
+并补充存在性检查，若 `.venv/bin/python` 不存在则直接退出。
+
+### 影响
+
+这可以减少本地 `pyenv` / 系统 Python / 项目 `.venv` 混用带来的歧义，让本地复现实验更稳定、更可追溯。
+
+## 13. `MPS` 可见性与手工特征方法补跑
+
+### 现象
+
+在本机直接运行 `verify_env.py` 时，项目 `.venv` 可以正确识别：
+
+```text
+Apple M2 MPS 加速可用
+```
+
+但通过 Codex CLI 的默认沙箱执行同一命令时，`torch.backends.mps.is_available()` 会返回 `False`，从而自动回退到 `CPU`。这说明问题不在项目代码，而在运行上下文是否允许访问本机 `Metal / MPS`。
+
+### 结论
+
+1. 若要在本机真正使用 `MPS`，训练命令需要在非沙箱方式下启动。
+2. 即使使用同一个 `.venv`，沙箱内外也可能得到不同的设备可用性结论。
+3. 因此设备问题排查时，需要同时记录“解释器环境”和“是否为沙箱运行”。
+
+### 手工特征方法补跑结果
+
+在修复 `exp/exp_supervised.py` 的验证阶段设备一致性后，已对 `EEGFeatures` 和 `ERPFeatures` 重新做 `MPS` 长跑：
+
+| 方法 | 结果路径 | Test F1 | Test AUROC |
+| --- | --- | ---: | ---: |
+| `EEGFeatures` | `results/EEGFeatures/supervised/EEGFeatures/S-CESCA-AODD-phase2-long-mps/results.txt` | 49.89% | 49.26% |
+| `ERPFeatures` | `results/ERPFeatures/supervised/ERPFeatures/S-CESCA-AODD-phase2-long-mps/results.txt` | 51.77% | 55.30% |
+
+对比原先 CPU 长跑：
+
+1. `EEGFeatures` 的数值基本一致。
+2. `ERPFeatures` 存在轻微数值波动，但整体排序未变。
+3. 当前 `MPS` 补跑已经覆盖 `EEGFeatures / ERPFeatures / EEGConformer`，说明这三种方法在本机 `MPS` 路径下都可以稳定完成训练与评估。

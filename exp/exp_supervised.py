@@ -94,14 +94,13 @@ class Exp_Supervised(Exp_Basic):
                 else:
                     outputs = self.model(batch_x, padding_mask, None, None)
 
-                pred = outputs.detach().cpu()
-                loss = criterion(pred, label.long().cpu())
-                total_loss.append(loss)
+                loss = criterion(outputs, label.long())
+                total_loss.append(loss.item())
 
-                preds.append(outputs.detach())
-                trues.append(label)
-                ids.append(sub_id)
-                dataset_ids.append(dataset_id)
+                preds.append(outputs.detach().cpu())
+                trues.append(label.detach().cpu())
+                ids.append(sub_id.detach().cpu())
+                dataset_ids.append(dataset_id.detach().cpu())
 
         total_loss = np.average(total_loss)
 
