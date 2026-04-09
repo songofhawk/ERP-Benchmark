@@ -13,7 +13,7 @@
 | 阶段 | 目标 | 当前状态 |
 | --- | --- | --- |
 | Phase 1 | 跑通 `CESCA-AODD + EEGNet` 完整 pipeline，并拿到可信 baseline | 已完成可信 baseline |
-| Phase 2 | 复现 A1：手工特征 vs 深度学习 | 进行中，已完成 `CESCA-AODD` 单数据集对比 |
+| Phase 2 | 复现 A1：手工特征 vs 深度学习 | 已完成 10 个数据集统一 `MPS` 对比，2 个数据集因单类问题跳过 |
 | Phase 3 | 复现 A4：patch embedding 对比 | 待开始 |
 
 当前建议的推进顺序：
@@ -193,12 +193,65 @@ Phase 1 已经完成，当前 baseline 比最初结果更可信。
 | 本地 shell 默认 `python` 指向 `pyenv`，容易与项目 `.venv` 混用 | `verify_env.py` 与训练脚本可能落在不同 `torch` 环境 | `scripts/EEGNet/supervised/EEGNet/S-1-local-mac.sh` |
 | Codex 沙箱内 `MPS` 设备不可见 | 在沙箱内运行时会自动回退到 CPU，误判为环境问题 | 启动命令需使用非沙箱方式 |
 
-### 2.5 下一步
+### 2.5 跨数据集总览
+
+当前已完成统一 `MPS` 对比的数据集共有 10 个：
+
+| 数据集 | 最优方法 | Test F1 | Test AUROC |
+| --- | --- | ---: | ---: |
+| `CESCA-AODD` | `EEGConformer` | 57.45% | 62.85% |
+| `CESCA-VODD` | `EEGConformer` | 70.67% | 79.82% |
+| `CESCA-FLANKER` | `EEGConformer` | 63.85% | 68.43% |
+| `mTBI-ODD` | `EEGConformer` | 62.79% | 84.92% |
+| `NSERP-MSIT` | `EEGNet` | 35.70% | 64.29% |
+| `NSERP-ODD` | `EEGConformer` | 63.23% | 88.90% |
+| `AOPD` | `EEGNet` | 75.08% | 87.06% |
+| `ADHD-WMRI` | `EEGConformer` | 69.93% | 78.60% |
+| `SCPD` | `EEGNet` | 74.28% | 83.26% |
+| `RLPD` | `ERPFeatures` | 71.62% | 78.14% |
+
+按“每个数据集谁是最优方法”统计：
+
+| 方法 | 获胜数据集数 |
+| --- | ---: |
+| `EEGConformer` | 6 |
+| `EEGNet` | 3 |
+| `ERPFeatures` | 1 |
+| `EEGFeatures` | 0 |
+
+按 10 个数据集的平均 Test 指标统计：
+
+| 方法 | 平均 Test F1 | 平均 Test AUROC |
+| --- | ---: | ---: |
+| `EEGConformer` | 62.19% | 77.03% |
+| `EEGNet` | 61.17% | 75.41% |
+| `ERPFeatures` | 57.97% | 70.87% |
+| `EEGFeatures` | 51.56% | 62.48% |
+
+### 2.6 跳过数据集
+
+以下两个 disease detection 数据集在当前处理后标签与现有 loader 组合下，训练集只包含单一类别，因此自动跳过：
+
+| 数据集 | 状态 | 原因 |
+| --- | --- | --- |
+| `PD-SIM` | skipped | `single_class_train_labels` |
+| `PD-ODD` | skipped | `single_class_train_labels` |
+
+### 2.7 当前阶段结论
+
+1. 在当前 10 个已完成数据集上，`EEGConformer` 是最稳定的强方法，赢下了 6 个数据集。
+2. `EEGNet` 是第二稳定的强基线，在 `AOPD`、`SCPD`、`NSERP-MSIT` 上取得最优结果。
+3. `ERPFeatures` 虽然整体不如最强深度模型，但在 `RLPD` 上取得了最优结果，说明手工特征在部分 disease detection 任务上仍有竞争力。
+4. `EEGFeatures` 在当前 10 个数据集里没有取得最优，但作为轻量手工特征基线仍可提供稳定对照。
+5. 当前结果已经明显超出单数据集 sanity check，可以作为 Phase 2 的阶段性结论基础，但仍不是论文 A1 的严格最终复现。
+
+### 2.8 下一步
 
 1. 评估是否把当前 `CESCA-AODD` 结果扩展到更多 ERP 数据集，再对照论文 A1 结论。
 2. 若继续 Phase 2，优先考虑增加重复随机种子或扩展到第二个 ERP 数据集，而不是直接跳到全量 12 数据集。
 3. 若要分析设备影响，可单独整理 CPU vs MPS 的差异，而不要与方法对比混写。
-4. 在 Phase 2 结论稳定后，再开始 Phase 3 的 patch embedding 对比。
+4. 若要补完 12 个数据集，需要先确认 `PD-SIM / PD-ODD` 当前处理后标签列是否与 loader 假设一致，再决定是否修 loader 或重做标签映射。
+5. 在 Phase 2 结论稳定后，再开始 Phase 3 的 patch embedding 对比。
 
 ## 3. Phase 3：A4 结论复现计划
 

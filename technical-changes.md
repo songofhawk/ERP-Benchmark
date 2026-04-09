@@ -16,6 +16,8 @@
 | 模型实现 | `models/EEGNet.py` | 将原自定义 `TemporalSpatialConv` 版本替换为标准 EEGNet-style 结构 |
 | NumPy 兼容 | `utils/tools.py` | `np.Inf` 替换为 `np.inf`，兼容 NumPy 2.x |
 | 本地脚本 | `scripts/EEGNet/supervised/EEGNet/S-1-local-mac.sh` | 增加本地 Phase 1 运行入口，并固定使用项目 `.venv/bin/python` |
+| 下载自动化 | `scripts/download_processed_datasets.py` | 绕开 `gdown --folder` 的单文件失败，逐文件续传下载 |
+| Phase 2 调度 | `scripts/phase2/run_phase2_dataset_mps.sh`, `scripts/phase2/monitor_download_and_run.py` | 自动串行跑多数据集统一 `MPS` 对比，并在失败时停住 |
 | Git 忽略 | `.gitignore` | 忽略 `paper/` 与 `.venv/` 等本地大文件或环境目录 |
 
 ## 1. 数据加载修复：按 Subject ID 配对
@@ -445,3 +447,91 @@ Apple M2 MPS 加速可用
 2. `ERPFeatures` 存在轻微数值波动，但整体排序未变。
 3. `EEGNet` 的 `MPS` 结果低于此前 CPU baseline，说明当前设置下不同设备路径之间仍可能存在可见的数值波动。
 4. 当前 `MPS` 补跑已经覆盖 `EEGFeatures / ERPFeatures / EEGNet / EEGConformer`，说明这四种方法在本机 `MPS` 路径下都可以稳定完成训练与评估。
+
+## 14. 批量下载脚本：绕开 `gdown` 单文件失败
+
+### 问题
+
+直接使用 `gdown --folder` 下载作者提供的 Google Drive 文件夹时，常见现象是：
+
+1. 大部分文件能正常跳过或续传。
+2. 个别文件会在中途报：
+
+```text
+Cannot retrieve the public link of the file.
+```
+
+这会导致整轮文件夹下载中断，即使其他文件其实都可以正常访问。
+
+### 新增脚本
+
+位置：`scripts/download_processed_datasets.py`
+
+它的策略是：
+
+1. 先通过 `gdown.download_folder(..., skip_download=True)` 拿到完整文件清单。
+2. 对每个文件优先尝试 `wget`。
+3. `wget` 失败则回退到 `curl`。
+4. 仍失败再回退到单文件 `gdown`。
+5. 对 `.npy` 文件做基础校验，避免把 HTML 错页当作数据文件。
+
+### 影响
+
+这个脚本比直接 `gdown --folder` 更适合当前这批处理后数据集，尤其适用于“少数文件链接异常、其余文件正常”的情况。
+
+## 15. 自动调度：多数据集统一 `MPS` 对比
+
+### 新增脚本
+
+| 路径 | 作用 |
+| --- | --- |
+| `scripts/phase2/run_phase2_dataset_mps.sh` | 对单个数据集顺序运行 `EEGFeatures / ERPFeatures / EEGNet / EEGConformer` |
+| `scripts/phase2/monitor_download_and_run.py` | 监控完整数据集目录并按队列自动触发下一轮对比 |
+
+### 调度规则
+
+1. 统一使用项目 `.venv/bin/python`。
+2. 统一使用本机非沙箱 `MPS` 路径运行。
+3. 已完成数据集自动跳过。
+4. 任一数据集任务失败时，整条队列停止。
+5. 每个数据集写独立日志、状态文件与当前模型文件。
+
+### 单类数据集自动跳过
+
+在批量运行中发现：
+
+| 数据集 | 现象 |
+| --- | --- |
+| `PD-SIM` | 训练集只有一个类别 |
+| `PD-ODD` | 训练集只有一个类别 |
+
+原来的行为是这类数据集会在带权交叉熵处直接崩溃，进而卡死整条队列。现在新增了预检查：
+
+1. 在正式启动四方法对比前，先读取训练集标签。
+2. 若训练集唯一类别数 `< 2`，则直接写入：
+
+```text
+skipped:single_class_train_labels
+```
+
+3. 调度器识别为跳过并继续下一个数据集，而不是把整条队列停死。
+
+### 当前结果范围
+
+截至本轮自动调度结束，统一 `MPS` 对比已经覆盖：
+
+- `CESCA-AODD`
+- `CESCA-VODD`
+- `CESCA-FLANKER`
+- `mTBI-ODD`
+- `NSERP-MSIT`
+- `NSERP-ODD`
+- `AOPD`
+- `ADHD-WMRI`
+- `SCPD`
+- `RLPD`
+
+并自动跳过：
+
+- `PD-SIM`
+- `PD-ODD`
