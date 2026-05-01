@@ -1,6 +1,6 @@
 # ERP-Benchmark 复现计划与里程碑
 
-更新日期：2026-04-07
+更新日期：2026-05-01
 
 本文档用于持续记录 ERP-Benchmark 复现进展。后续每推进一个阶段，优先在对应章节追加“实验设置、关键结果、发现的问题、代码改动、下一步计划”。
 
@@ -14,13 +14,13 @@
 | --- | --- | --- |
 | Phase 1 | 跑通 `CESCA-AODD + EEGNet` 完整 pipeline，并拿到可信 baseline | 已完成可信 baseline |
 | Phase 2 | 复现 A1：手工特征 vs 深度学习 | 已完成 10 个数据集统一 `MPS` 对比，2 个数据集因单类问题跳过 |
-| Phase 3 | 复现 A4：patch embedding 对比 | 待开始 |
+| Phase 3 | 复现 A4：patch embedding 对比 | AutoDL 云端准备中 |
 
 当前建议的推进顺序：
 
 1. 固化 Phase 1 的可信 EEGNet baseline。
-2. 开始 Phase 2，比较 `EEGFeatures / ERPFeatures / EEGNet / EEGConformer`。
-3. 在 Phase 2 结果稳定后，再推进 Phase 3 的 `Multi-variate / Uni-variate / Whole-variate` patch embedding 对比。
+2. 完成 Phase 2，比较 `EEGFeatures / ERPFeatures / EEGNet / EEGConformer`。
+3. 推进 Phase 3 的 `Multi-variate / Uni-variate / Whole-variate` patch embedding 对比，并迁移到 AutoDL GPU 环境执行。
 
 ## 1. Phase 1：CESCA-AODD + EEGNet
 
@@ -255,21 +255,115 @@ Phase 1 已经完成，当前 baseline 比最初结果更可信。
 
 ## 3. Phase 3：A4 结论复现计划
 
-目标：复现 patch embedding 对 ERP 建模影响的结论。
+目标：复现 patch embedding 对 ERP 建模影响的结论。Phase 2 已经完成 10 个数据集统一 `MPS` 对比，Phase 3 不再建议基于本地 Mac 长跑，应迁移到云端 GPU，并把环境、数据、脚本、结果回收都提前自动化，以减少按时计费的空转时间。
 
-建议在 Phase 2 完成后推进：
+### 3.1 对比范围
 
 | 对比项 | 说明 | 状态 |
 | --- | --- | --- |
-| `Multi-variate` | 多变量 patch embedding | 待跑 |
-| `Uni-variate` | 单变量 patch embedding | 待跑 |
-| `Whole-variate` | 全变量 patch embedding | 待跑 |
+| `Multi-variate` | 多变量 patch embedding，现有脚本 `scripts/TestFormer/supervised/TestFormer/S-1-Multi-Variate.sh` | 待云端 sanity |
+| `Uni-variate` | 单变量 patch embedding，现有脚本 `scripts/TestFormer/supervised/TestFormer/S-1-Uni-Variate.sh` | 待云端 sanity |
+| `Whole-variate` | 全变量 patch embedding，现有脚本 `scripts/TestFormer/supervised/TestFormer/S-1-Whole-Variate.sh` | 待云端 sanity |
 
-Phase 3 备注：
+当前代码中已有 `run.py --patch_type`，可选值为 `multi-variate / uni-variate / whole-variate`；模型入口为 `models/TestFormer.py`。因此 Phase 3 的主要工作不是新增模型，而是做云端实验调度、失败恢复、日志汇总和成本控制。
 
-1. 全量 12 数据集会明显增加耗时。
-2. 本地 Mac 更适合做小规模 sanity check。
-3. 大规模复现建议迁移到 GPU 云服务器。
+### 3.2 AutoDL API 调研结论
+
+官方文档确认 AutoDL 支持两类可用 API：
+
+| 路线 | 能力 | 适用性 |
+| --- | --- | --- |
+| 容器实例 Pro API | 支持开发者 Token 鉴权、创建实例、查询实例状态、开机、关机、释放、保存镜像、获取镜像列表；创建实例时可指定 GPU 数量、规格 ID、镜像 UUID、CUDA 下限和开机后执行命令 | 推荐作为个人账号优先路线，适合“租一台实例 -> 跑完整实验 -> 关机/释放”的训练任务 |
+| 弹性部署 API | 支持创建 `ReplicaSet / Job / Container`，可设置 GPU 型号、GPU 数量、CPU/内存/价格范围、镜像 UUID、启动命令，并可查询容器、停止容器、停止/删除部署、查询 GPU 库存 | 更适合批量 Job 化训练，但官方文档写明需要先认证企业；若账号不具备企业能力，则作为备选 |
+
+关键限制与注意事项：
+
+1. AutoDL API Host 为 `https://api.autodl.com`，Token 在控制台设置页获取。
+2. 容器实例 Pro API 创建实例默认是按量计费，创建接口文档标注暂不支持通过 API 选择其他计费方式。
+3. 容器实例 Pro API 的 `start_command` 只是在开机后执行，失败不会导致实例自动关机，因此训练脚本内部必须自己做失败退出、结果打包、主动关机或外部 watchdog。
+4. 弹性部署 API 的自定义镜像需要先在 AutoDL 网页创建并保存，文档标注暂不支持从外部导入镜像。
+5. 弹性部署 API 有 GPU 库存查询接口，但文档提醒库存默认按 1 张卡筛选；如果一个容器需要 2 卡，库存结果不保证可调度到同一台机器。
+6. 计费按容器开机到关机的时间计算，不以是否实际调用 GPU 为准；因此所有下载、解压、依赖安装都应该尽量在镜像或数据盘预热阶段完成。
+
+参考链接：
+
+| 内容 | 链接 |
+| --- | --- |
+| 容器实例 Pro API | `https://www.autodl.com/docs/instance_pro_api/` |
+| 弹性部署 API | `https://www.autodl.com/docs/esd_api_doc/` |
+| 计费规则 | `https://www.autodl.com/docs/price/` |
+
+### 3.3 推荐执行路线
+
+Phase 3 建议分三轮，不直接一口气跑全量：
+
+| 轮次 | 目标 | 数据集 | patch 类型 | 运行设置 | 放行条件 |
+| --- | --- | --- | --- | --- | --- |
+| Round 0：本地/CPU 脚本预检 | 验证脚本生成、参数、结果目录、跳过逻辑 | `CESCA-AODD` | 3 种 | `itr=1`, `train_epochs=1` | 三种 patch type 都能完整训练、验证、测试并写出 `results.txt` |
+| Round 1：AutoDL 单卡 sanity | 验证 CUDA 环境、数据路径、显存、日志回收 | `CESCA-AODD` | 3 种 | `itr=1`, 短 epoch 或较小 patience | 三种 patch type 在 CUDA 上无 OOM、无 loader 错误，结果可自动回收 |
+| Round 2：AutoDL 正式批量 | 复现 A4 主结论 | 优先 Phase 2 已完成的 10 个有效数据集；`PD-SIM / PD-ODD` 暂不进入正式结论 | 3 种 | 先 `itr=1`，稳定后再考虑 `itr=5` | 每个有效数据集都有三种 patch type 的 Test F1/AUROC/AUPRC，并能生成汇总表 |
+
+不建议一开始就跑原脚本里的全量 `12 datasets × 3 patch types × itr=5 × 200 epochs`。按现有 Phase 2 经验，`PD-SIM / PD-ODD` 当前存在训练集单类问题，直接纳入会浪费云端时间，也会污染 Phase 3 对比口径。
+
+### 3.4 租机前准备清单
+
+租用 AutoDL 前先在本地完成：
+
+1. 新增 Phase 3 调度脚本：从数据集列表和 patch type 生成单个实验命令，支持 `--dataset`、`--patch_type`、`--itr`、`--epochs`、`--patience`、`--batch_size`。
+2. 新增数据集预检：复用 Phase 2 的单类标签检查，正式批量前自动跳过 `single_class_train_labels` 数据集。
+3. 新增结果跳过逻辑：若目标 `results.txt` 已存在且包含 Test 指标，则默认不重复跑；允许 `--force` 覆盖。
+4. 新增云端 bootstrap 脚本：完成 `git clone/pull`、虚拟环境创建、依赖安装、`python verify_env.py`、数据目录检查、1 epoch smoke test。
+5. 新增结果打包脚本：训练结束后压缩 `results/TestFormer`、`checkpoints/TestFormer`、运行日志和环境信息。
+6. 准备数据策略：优先把 `dataset/200Hz` 放在 AutoDL 数据盘或网盘缓存中；不把大数据下载放进正式计费窗口。
+7. 准备环境镜像：首次手动创建 AutoDL 实例，安装依赖并保存私有镜像；后续 API 创建实例直接使用该 `image_uuid`。
+8. 准备密钥与配置：本地保存 `AUTODL_TOKEN`、`AUTODL_IMAGE_UUID`、目标 GPU 规格、地区、预算上限；这些配置不提交到 git。
+
+### 3.5 AutoDL 自动化设计
+
+建议新增 `scripts/autodl/` 目录，职责分层如下：
+
+| 脚本 | 职责 |
+| --- | --- |
+| `bootstrap_phase3.sh` | 云端实例启动后执行，负责进入项目、同步代码、校验 CUDA、校验数据、启动 Phase 3 runner |
+| `run_phase3_matrix.py` | 读取数据集和 patch type 矩阵，串行或并行调度实验，支持断点续跑 |
+| `collect_phase3_results.py` | 汇总 `results/TestFormer/.../results.txt`，输出 CSV/Markdown 表 |
+| `autodl_pro_client.py` | 调用容器实例 Pro API：创建实例、查状态、查详情、关机、释放 |
+| `autodl_watchdog.py` | 本地监控实例状态和最大运行时长，超过预算或训练结束后调用关机/释放 |
+
+容器实例 Pro API 的首选流程：
+
+1. 手动准备一次基础实例，安装依赖，确认 `torch.cuda.is_available()`，保存为私有镜像。
+2. 本地脚本调用 `/api/v1/dev/instance/pro/create`，指定 `gpu_spec_uuid`、`req_gpu_amount`、`image_uuid`、`cuda_v_from` 和 `start_command`。
+3. 轮询 `/api/v1/dev/instance/pro/status` 和 `/api/v1/dev/instance/pro/snapshot`，拿到 SSH 信息后确认训练开始。
+4. 训练脚本完成后写出 `PHASE3_DONE` 标记并打包结果。
+5. 本地 watchdog 检测完成标记或超过最大时长，调用 `/power_off`，确认关机后再 `/release`。
+
+弹性部署 API 的备选流程：
+
+1. 若账号完成企业认证，优先使用 `deployment_type=Job`，把每个 patch type 或数据集切成独立 Job。
+2. 创建前调用 GPU 库存接口，筛选地区、CUDA、GPU 型号和价格范围。
+3. 使用 `reuse_container=true` 减少重复创建容器耗时。
+4. 通过容器查询接口回收 SSH、状态和价格信息；失败容器可设置调度黑名单后重试。
+
+### 3.6 资源与成本策略
+
+初始推荐配置：
+
+| 项目 | 建议 |
+| --- | --- |
+| GPU | 先用单卡 `RTX 4090` 或 `4090-48G` 跑 sanity；确认显存后再考虑 2 卡并行 |
+| 并行方式 | 优先“多进程多实验分卡”，不优先改模型 DDP；现有脚本只是设置 `CUDA_VISIBLE_DEVICES=0,1,2,3`，并不等于已经实现多卡训练 |
+| batch size | 从原脚本 `128` 开始；若 OOM，降到 `64/32`，记录为云端修订设置 |
+| 正式范围 | 先跑 Phase 2 已确认有效的 10 个数据集；`PD-SIM / PD-ODD` 另开数据标签修复任务 |
+| 成本止损 | 每轮设置最大运行时长、最大失败次数、结果目录已存在跳过；训练完成必须自动关机 |
+
+### 3.7 下一步
+
+1. 本地先实现 Phase 3 runner、结果汇总和 AutoDL bootstrap，不立即租机。
+2. 用 `CESCA-AODD × 3 patch types × 1 epoch` 做脚本级 smoke test。
+3. 手动创建一次 AutoDL 实例，安装环境并保存镜像，记录 `image_uuid`。
+4. 通过容器实例 Pro API 做一次短租 sanity，验证自动启动、训练、结果打包、关机/释放全链路。
+5. Sanity 通过后再执行 10 个有效数据集的正式 Phase 3 批量实验。
 
 ## 4. 后续更新模板
 
