@@ -7,6 +7,7 @@ DATA_ROOT="${PHASE3_DATA_ROOT:-}"
 DATA_ARCHIVE_URL="${PHASE3_DATA_ARCHIVE_URL:-}"
 DATA_ARCHIVE_NAME="${PHASE3_DATA_ARCHIVE_NAME:-cesca-aodd-200hz.tar.gz}"
 DATA_EXTRACT_DIR="${PHASE3_DATA_EXTRACT_DIR:-/root/autodl-fs}"
+ALLOW_BOOTSTRAP_DOWNLOAD="${PHASE3_ALLOW_BOOTSTRAP_DOWNLOAD:-0}"
 INSTALL_REQUIREMENTS="${PHASE3_INSTALL_REQUIREMENTS:-0}"
 REQUIREMENTS_FILE="${PHASE3_REQUIREMENTS_FILE:-requirements-phase3-sanity.txt}"
 PYTHON_BIN="${PHASE3_PYTHON:-}"
@@ -86,6 +87,13 @@ ensure_phase3_data() {
 
   if [[ -z "$DATA_ARCHIVE_URL" ]]; then
     echo "CESCA-AODD data missing under $DATA_ROOT and PHASE3_DATA_ARCHIVE_URL is not set" >&2
+    return 2
+  fi
+
+  if [[ "$ALLOW_BOOTSTRAP_DOWNLOAD" != "1" ]]; then
+    echo "CESCA-AODD data missing under $DATA_ROOT." >&2
+    echo "Run scripts/autodl/prepare_phase3_data_fs.sh on an instance with /root/autodl-fs mounted before renting GPU." >&2
+    echo "Set PHASE3_ALLOW_BOOTSTRAP_DOWNLOAD=1 only if you intentionally want the GPU bootstrap to download data." >&2
     return 2
   fi
 
